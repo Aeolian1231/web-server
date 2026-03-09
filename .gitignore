@@ -1,0 +1,8 @@
+cd ~/webServerStartCodes-2025
+cat > .gitignore <<'EOF'
+.vscode-server/
+.vscode-server-insiders/
+.vscode/extensions/
+.DS_Store
+*.log
+EOF
