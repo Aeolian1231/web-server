@@ -12,7 +12,6 @@ void init_logger() {
     error_log = fopen("./logger/error_log", "a");
     if (!error_log) {
         perror("Failed to open error log file");
-        fclose(error_log);
         exit(EXIT_FAILURE);
     }
     
@@ -54,12 +53,12 @@ void log_error(const char *message, const char* request, const char *client_ip, 
     // 分配足够的空间来存储拼接后的消息
     size_t len = strlen(message) + strlen(request) + 1;
     char *mesg = (char *)malloc(len);
-    strcpy(mesg, message);
-    strcat(mesg, request);
-
     if (mesg == NULL) {
         return;
     }
+
+    strcpy(mesg, message);
+    strcat(mesg, request);
     
     time_t now;
     time(&now);

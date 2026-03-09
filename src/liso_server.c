@@ -336,7 +336,6 @@ int Send_back(int client_sock_i){
             free(return_buf);
         }
     }
-    free(nextRequest);
     return res;
 }
 
@@ -418,6 +417,8 @@ int main(int argc, char *argv[]) {
             if(FD_ISSET(sock, &tmp)) { // 监听套接字就绪（有新的连接）
                 cli_size = sizeof(cli_addr);
                 client_sock = accept(sock, (struct sockaddr *) &cli_addr, &cli_size);
+                if (client_sock >= 1024) 
+                    close_socket(client_sock);
                 clients[client_sock].addr = cli_addr;
                 // 记录客户端活跃时间
                 clients[client_sock].last_active = time(NULL);
