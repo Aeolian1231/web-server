@@ -1,12 +1,26 @@
-# ---- C++ epoll server (Milestone 1) ----
+# ---- C++ epoll Reactor + threadpool server (Stage 2) ----
 CXX       ?= g++
 CXXFLAGS  ?= -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 CPP_INCS  := -Iinclude_cpp
-CPP_SRCS  := src_cpp/webserver_epoll.cpp src_cpp/epoller.cpp
+
+# Add Stage 2 sources (epoll entry + epoller + buffer/http/conn + threadpool + notifier)
+CPP_SRCS := \
+  src_cpp/webserver_epoll.cpp \
+  src_cpp/epoller.cpp \
+  src_cpp/timer_heap.cpp \
+  src_cpp/buffer.cpp \
+  src_cpp/http.cpp \
+  src_cpp/http_response.cpp \
+  src_cpp/conn.cpp \
+  src_cpp/threadpool.cpp \
+  src_cpp/notifier.cpp
+
 CPP_OBJS  := $(CPP_SRCS:.cpp=.o)
 CPP_BIN   := bin/webserver_epoll
 
-.PHONY: epoll_server clean_epoll
+.PHONY: all epoll_server clean_epoll
+
+all: epoll_server
 
 epoll_server: $(CPP_BIN)
 
