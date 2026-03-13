@@ -13,7 +13,8 @@ CPP_SRCS := \
   src_cpp/http_response.cpp \
   src_cpp/conn.cpp \
   src_cpp/threadpool.cpp \
-  src_cpp/notifier.cpp
+  src_cpp/notifier.cpp \
+  src_cpp/async_logger.cpp
 
 CPP_OBJS  := $(CPP_SRCS:.cpp=.o)
 CPP_BIN   := bin/webserver_epoll
