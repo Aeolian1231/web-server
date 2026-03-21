@@ -26,8 +26,10 @@
 
 static constexpr int kPort = 9999;
 static const std::string kDocRoot = "./static_site";
-// idle timeout for connections
+// idle timeout for connections (short activity timeout)
 static const std::chrono::seconds kIdleTimeout = std::chrono::seconds(5);
+// keep-alive idle timeout (longer)
+static const std::chrono::seconds kKeepAliveTimeout = std::chrono::seconds(60);
 // maximum epoll_wait sleep if timer says longer or timer empty (ms)
 static const int kMaxEpollWaitMs = 1000;
 
@@ -121,7 +123,7 @@ int main() {
                     std::cerr << "[timer] closing idle fd=" << fd_exp << " (found in conns)\n";
                     closeConn(ep, conns, timer, fd_exp);
                 } else {
-                    // expired timer but no active conn in map — log and ensure OS fd closed to be safe
+                    // expired timer but no active conn in map – log and ensure OS fd closed to be safe
                     std::cerr << "[timer] expired fd=" << fd_exp << " not found in conns; attempting close() to be safe\n";
                     // try safe close and remove timer entry (timer.remove already called by popExpired)
                     ::close(fd_exp); // best-effort; may be invalid but harmless
@@ -148,7 +150,8 @@ int main() {
                         auto connPtr = std::make_shared<Conn>(cfd, cli);
                         conns.emplace(cfd, connPtr);
                         ep.addFd(cfd, EPOLLIN | EPOLLRDHUP | EPOLLERR);
-                        timer.addOrUpdate(cfd, TimerHeap::Clock::now() + kIdleTimeout);
+                        // New connection: use keep-alive timeout
+                        timer.addOrUpdate(cfd, TimerHeap::Clock::now() + kKeepAliveTimeout);
                     }
                     continue;
                 }
@@ -179,8 +182,8 @@ int main() {
                         closeConn(ep, conns, timer, fd);
                         continue;
                     }
-                    // any read activity -> refresh timer
-                    timer.addOrUpdate(fd, TimerHeap::Clock::now() + kIdleTimeout);
+                    // any read activity -> refresh timer (keep-alive window)
+                    timer.addOrUpdate(fd, TimerHeap::Clock::now() + kKeepAliveTimeout);
 
                     if (header_len == 0) {
                         // incomplete header
@@ -198,16 +201,31 @@ int main() {
                         std::string responseStr;
                         BuiltResponse br;
                         if (pr != ParseResult::Ok) {
-                            responseStr = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                            // DEBUG: 打印收到的原始 header，确认 parse 内容
+                            std::cerr << "[worker] parseHttpRequest FAILED. raw header: [[" << headerCopy << "]]\n";
+
+                            // 临时：返回 400 但使用 keep-alive 以确认是否是 "响应中 Connection: close 导致断开"
+                            responseStr = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
                             br.status = 400;
                             br.body_length = 0;
+                            br.bytes = responseStr;
+                            br.close = false;                // 表示服务端不主动关闭
+                            workerConn->setKeepAlive(true);  // 强制保活（仅用于调试）
                         } else {
+                            // 正常解析路径：打印一些解析结果供调试
+                            std::cerr << "[worker] parsed request: method=" << req.method
+                                    << " uri=" << req.uri << " version=" << req.version << "\n";
                             br = buildStaticFileResponse(req, kDocRoot);
                             responseStr = br.bytes;
+                            workerConn->setKeepAlive(!br.close);
                         }
+
+                        std::cerr << "[worker] fd=" << workerConn->fd() << " status=" << br.status
+                            << " resp_len=" << responseStr.size() << " br.close=" << (br.close ? "true" : "false") << "\n";
+
                         // set response and notify reactor
                         workerConn->setResponseFromWorker(responseStr);
-                        // Log access asynchronously
+                        // Log access asynchronously (如果 parse 失败，req 可能空)
                         std::string client_ip = workerConn->peerIp();
                         std::string request_line = req.method + " " + req.uri + " " + req.version;
                         logger.logAccess(client_ip, request_line, br.status, br.body_length);
@@ -221,7 +239,9 @@ int main() {
                 if (ev & EPOLLOUT) {
                     bool shouldClose = connPtr->writeOut();
                     if (!shouldClose) {
-                        timer.addOrUpdate(fd, TimerHeap::Clock::now() + kIdleTimeout);
+                        // keep-alive: continue listening for read (next request), and refresh keep-alive timeout
+                        timer.addOrUpdate(fd, TimerHeap::Clock::now() + kKeepAliveTimeout);
+                        try { ep.modFd(fd, EPOLLIN | EPOLLRDHUP | EPOLLERR); } catch(...) {}
                     }
                     if (shouldClose) {
                         std::cerr << "[close] EPOLLOUT finished, closing fd=" << fd << "\n";

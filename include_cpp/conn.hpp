@@ -34,6 +34,10 @@ public:
     // Peer ip as string
     std::string peerIp() const;
 
+    // Keep-alive control
+    bool shouldKeepAlive() const { return keepAlive_; }
+    void setKeepAlive(bool ka) { keepAlive_ = ka; }
+
     Conn(const Conn&) = delete;
     Conn& operator=(const Conn&) = delete;
 
@@ -45,4 +49,5 @@ private:
     Buffer out_;
     mutable std::mutex out_mtx_;
     bool responseReady_ = false;
+    bool keepAlive_ = true;  // 默认允许 keep-alive（可由响应/请求逻辑覆盖）
 };

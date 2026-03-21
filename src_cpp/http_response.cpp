@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 static std::string mimeFromPath(const std::string& path) {
     auto dot = path.find_last_of('.');
@@ -30,10 +31,27 @@ static BuiltResponse simpleStatus(int code) {
     else if (code == 405) oss << "HTTP/1.1 405 Method Not Allowed\r\n";
     else oss << "HTTP/1.1 500 Internal Server Error\r\n";
 
+    // 错误分支使用 Connection: close，简化错误处理
     oss << "Content-Length: 0\r\n"
         << "Connection: close\r\n\r\n";
     r.bytes = oss.str();
+    r.close = true;
     return r;
+}
+
+// helper: case-insensitive header lookup
+static bool headerContains(const std::unordered_map<std::string, std::string>& headers, const std::string& key, const std::string& token) {
+    for (const auto& kv : headers) {
+        std::string k = kv.first;
+        std::string v = kv.second;
+        // lower-case both
+        std::transform(k.begin(), k.end(), k.begin(), ::tolower);
+        std::transform(v.begin(), v.end(), v.begin(), ::tolower);
+        if (k == key) {
+            if (v.find(token) != std::string::npos) return true;
+        }
+    }
+    return false;
 }
 
 BuiltResponse buildStaticFileResponse(const HttpRequest& req, const std::string& docRoot) {
@@ -69,16 +87,37 @@ BuiltResponse buildStaticFileResponse(const HttpRequest& req, const std::string&
         body.clear();
     }
 
+    // Decide keep-alive based on request version and Connection header
+    bool clientKeepAlive = false;
+    if (req.version == "HTTP/1.1") {
+        clientKeepAlive = true; // default for HTTP/1.1
+    } else {
+        clientKeepAlive = false; // HTTP/1.0 default is close
+    }
+
+    // If client explicitly specified Connection header, honor it (case-insensitive)
+    if (headerContains(req.headers, "connection", "close")) {
+        clientKeepAlive = false;
+    } else if (headerContains(req.headers, "connection", "keep-alive")) {
+        clientKeepAlive = true;
+    }
+
     std::ostringstream oss;
     oss << "HTTP/1.1 200 OK\r\n"
         << "Content-Type: " << mimeFromPath(full) << "\r\n"
-        << "Content-Length: " << static_cast<long long>(fileLen) << "\r\n"
-        << "Connection: close\r\n\r\n";
+        << "Content-Length: " << static_cast<long long>(fileLen) << "\r\n";
+
+    if (clientKeepAlive) {
+        oss << "Connection: keep-alive\r\n\r\n";
+    } else {
+        oss << "Connection: close\r\n\r\n";
+    }
 
     BuiltResponse r;
     r.status = 200;
     r.body_length = static_cast<long long>(fileLen);
     r.bytes = oss.str();
     if (req.method == "GET") r.bytes += body;
+    r.close = !clientKeepAlive;
     return r;
 }

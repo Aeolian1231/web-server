@@ -1,6 +1,7 @@
 #include "conn.hpp"
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <iostream>
 
 Conn::Conn(int fd, const sockaddr_in& addr) : fd_(fd), addr_(addr) {}
 
@@ -31,19 +32,39 @@ std::string Conn::peekReadableAsString(size_t len) const {
 
 void Conn::retrieve(size_t len) { in_.retrieve(len); }
 
+// replace setResponseFromWorker
 void Conn::setResponseFromWorker(const std::string& response) {
     std::lock_guard<std::mutex> lk(out_mtx_);
     out_.retrieveAll();
     out_.append(response.data(), response.size());
     responseReady_ = true;
+    // DEBUG
+    std::cerr << "[Conn::setResponse] fd=" << fd_ << " response_len=" << response.size()
+              << " keepAlive=" << (keepAlive_ ? "yes" : "no") << "\n";
 }
 
+// replace writeOut
 bool Conn::writeOut() {
     std::lock_guard<std::mutex> lk(out_mtx_);
     int saved = 0;
     ssize_t n = out_.writeFd(fd_, &saved);
-    if (n < 0) return true;
-    if (out_.readableBytes() == 0) return true;
+    if (n < 0) {
+        std::cerr << "[Conn::writeOut] fd=" << fd_ << " write error errno=" << saved << "\n";
+        return true; // close on write error
+    }
+    size_t remain = out_.readableBytes();
+    std::cerr << "[Conn::writeOut] fd=" << fd_ << " wrote=" << n << " remain=" << remain
+              << " keepAlive=" << (keepAlive_ ? "yes" : "no") << "\n";
+    if (remain == 0) {
+        if (!keepAlive_) {
+            std::cerr << "[Conn::writeOut] fd=" << fd_ << " response finished -> closing (keepAlive=false)\n";
+            return true;
+        }
+        // 保活：清理输入缓冲以便解析下一请求
+        in_.retrieveAll();
+        std::cerr << "[Conn::writeOut] fd=" << fd_ << " response finished -> keep connection open\n";
+        return false;
+    }
     return false;
 }
 

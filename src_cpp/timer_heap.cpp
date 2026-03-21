@@ -5,10 +5,10 @@
 
 void TimerHeap::addOrUpdate(int fd, TimePoint expiresAt) {
     // DEBUG
-    std::cerr << "[timer_debug] addOrUpdate fd=" << fd
-              << " expiresAt(ms)="
-              << std::chrono::duration_cast<std::chrono::milliseconds>(expiresAt.time_since_epoch()).count()
-              << "\n";
+    // std::cerr << "[timer_debug] addOrUpdate fd=" << fd
+    //           << " expiresAt(ms)="
+    //           << std::chrono::duration_cast<std::chrono::milliseconds>(expiresAt.time_since_epoch()).count()
+    //           << "\n";
 
     auto it = index_.find(fd);
     if (it == index_.end()) {
@@ -50,9 +50,9 @@ int TimerHeap::nextTimeoutMs(TimePoint now) const {
 
 std::vector<int> TimerHeap::popExpired(TimePoint now) {
     // DEBUG
-    std::cerr << "[timer_debug] popExpired at(ms)="
-              << std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()
-              << " heap_size=" << heap_.size() << "\n";
+    // std::cerr << "[timer_debug] popExpired at(ms)="
+    //           << std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()
+    //           << " heap_size=" << heap_.size() << "\n";
 
     std::vector<int> expired;
     while (!heap_.empty()) {
