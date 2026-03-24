@@ -15,7 +15,7 @@
 #include <unistd.h>
 
 #include <chrono>
-#include <cerrno>
+#include <cerrno>`
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -38,7 +38,7 @@ static int createListenFd() {
     if (fd < 0) throwSys("socket");
 
     setReuseAddrPort(fd);
-    setNonBlocking(fd);
+    setNonBlocking(fd); // 设置为非阻塞模式
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -98,11 +98,7 @@ int main() {
             // CAP the epoll_wait timeout so we wake periodically even if timer is empty or large
             if (timeoutMs < 0 || timeoutMs > kMaxEpollWaitMs) timeoutMs = kMaxEpollWaitMs;
 
-            // DEBUG: print next timeout and heap size
-            std::cerr << "[timer_debug] nextTimeoutMs=" << timeoutMs
-                      << " timer_size=" << timer.size() << "\n";
-
-            int n = ep.wait(events, timeoutMs);
+            int n = ep.wait(events, timeoutMs); // 阻塞等待有时间发生/超时
             if (n < 0) {
                 if (errno == EINTR) continue;
                 throwSys("epoll_wait");
@@ -111,12 +107,7 @@ int main() {
             now = TimerHeap::Clock::now();
             auto expired = timer.popExpired(now);
 
-            // DEBUG: print expired list and conns size
-            std::cerr << "[timer_debug] popExpired returned " << expired.size()
-                    << " entries; conns.size()=" << conns.size() << " now(ms)="
-                    << std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()
-                    << "\n";
-
+            // 删除超时连接
             for (int fd_exp : expired) {
                 auto cit = conns.find(fd_exp);
                 if (cit != conns.end()) {
@@ -134,11 +125,12 @@ int main() {
                 int fd = events[i].data.fd;
                 uint32_t ev = events[i].events;
 
+                // 处理新用户连接请求
                 if (fd == lfd) {
                     while (true) {
                         sockaddr_in cli{};
                         socklen_t len = sizeof(cli);
-                        int cfd = ::accept(lfd, reinterpret_cast<sockaddr*>(&cli), &len);
+                        int cfd = ::accept(lfd, reinterpret_cast<sockaddr*>(&cli), &len); // 处理完成 cfd = -1
                         if (cfd < 0) {
                             if (errno == EAGAIN || errno == EWOULDBLOCK) break;
                             throwSys("accept");
@@ -150,22 +142,25 @@ int main() {
                         auto connPtr = std::make_shared<Conn>(cfd, cli);
                         conns.emplace(cfd, connPtr);
                         ep.addFd(cfd, EPOLLIN | EPOLLRDHUP | EPOLLERR);
+
                         // New connection: use keep-alive timeout
                         timer.addOrUpdate(cfd, TimerHeap::Clock::now() + kKeepAliveTimeout);
                     }
                     continue;
                 }
 
+                // 处理工作线程通知事件
                 if (fd == notifier.fd()) {
                     std::vector<int> pending = notifier.drainPending();
                     for (int wfd : pending) {
                         auto it = conns.find(wfd);
                         if (it == conns.end()) continue;
-                        try { ep.modFd(wfd, EPOLLOUT | EPOLLRDHUP | EPOLLERR); } catch(...) {}
+                        try { ep.modFd(wfd, EPOLLOUT | EPOLLRDHUP | EPOLLERR); } catch(...) {} // 修改当前fd状态
                     }
                     continue;
                 }
 
+                // 客户端关闭发送端/套接字错误
                 if (ev & (EPOLLERR | EPOLLRDHUP)) {
                     std::cerr << "[event] EPOLLERR/EPOLLRDHUP on fd=" << fd << "\n";
                     closeConn(ep, conns, timer, fd);
@@ -176,13 +171,14 @@ int main() {
                 if (it == conns.end()) { ::close(fd); continue; }
                 auto connPtr = it->second;
 
+                // 处理读事件
                 if (ev & EPOLLIN) {
                     ssize_t header_len = connPtr->readIntoBuffer();
                     if (header_len < 0) {
                         closeConn(ep, conns, timer, fd);
                         continue;
                     }
-                    // any read activity -> refresh timer (keep-alive window)
+                    // 活跃连接：更新定时器
                     timer.addOrUpdate(fd, TimerHeap::Clock::now() + kKeepAliveTimeout);
 
                     if (header_len == 0) {
@@ -191,10 +187,10 @@ int main() {
                     }
 
                     size_t bytes = static_cast<size_t>(header_len);
-                    std::string headerCopy = connPtr->peekReadableAsString(bytes);
+                    std::string headerCopy = connPtr->peekReadableAsString(bytes); // 发送给worker线程处理
 
                     std::shared_ptr<Conn> workerConn = connPtr;
-                    pool.submit([workerConn, headerCopy, &notifier, &logger]() {
+                    pool.submit([workerConn, headerCopy, &notifier, &logger]() { // 在worker线程运行
                         HttpRequest req;
                         size_t consumed = 0;
                         ParseResult pr = parseHttpRequest(headerCopy.data(), headerCopy.size(), consumed, req);
@@ -213,8 +209,8 @@ int main() {
                             workerConn->setKeepAlive(true);  // 强制保活（仅用于调试）
                         } else {
                             // 正常解析路径：打印一些解析结果供调试
-                            std::cerr << "[worker] parsed request: method=" << req.method
-                                    << " uri=" << req.uri << " version=" << req.version << "\n";
+                            // std::cerr << "[worker] parsed request: method=" << req.method
+                            //         << " uri=" << req.uri << " version=" << req.version << "\n";
                             br = buildStaticFileResponse(req, kDocRoot);
                             responseStr = br.bytes;
                             workerConn->setKeepAlive(!br.close);
